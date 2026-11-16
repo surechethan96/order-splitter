@@ -1,0 +1,125 @@
+:root {
+  --bg: #f4f6fa;
+  --card: #ffffff;
+  --ink: #152033;
+  --muted: #5b6b82;
+  --line: #dde3ec;
+  --accent: #1f5fbf;
+  --accent-ink: #ffffff;
+  --buy: #0f7b4f;
+  --sell: #b3382c;
+  --warn-bg: #fff6df;
+  --warn-ink: #7a5300;
+  --ok-bg: #e6f5ee;
+  --err-bg: #fdecea;
+  --radius: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f141c;
+    --card: #171e29;
+    --ink: #e8edf5;
+    --muted: #9aa8bc;
+    --line: #2a3445;
+    --accent: #5b9bf0;
+    --accent-ink: #0b1220;
+    --buy: #4cc38a;
+    --sell: #f08a7e;
+    --warn-bg: #3a2f12;
+    --warn-ink: #f3d28a;
+    --ok-bg: #143326;
+    --err-bg: #3b1a17;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+h1, h2, h3 { margin: 0; line-height: 1.2; }
+h1 { font-size: 20px; }
+h2 { font-size: 17px; margin-bottom: 16px; }
+h3 { font-size: 14px; }
+.top {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 16px 24px; background: var(--card); border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand p { margin: 0; color: var(--muted); font-size: 13px; }
+.logo { font-size: 28px; color: var(--accent); }
+nav { display: flex; gap: 16px; }
+a { color: var(--accent); text-decoration: none; font-weight: 600; }
+a:hover { text-decoration: underline; }
+main {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px;
+  max-width: 1240px; margin: 24px auto; padding: 0 16px;
+}
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; min-width: 0; }
+.wide { grid-column: 1 / -1; }
+@media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; }
+.row.tight { margin: 0; align-items: center; flex-wrap: nowrap; }
+.row.tight select { width: auto; }
+.grow { flex: 1 1 180px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field span, legend, .holdings-labels { font-size: 12px; color: var(--muted); font-weight: 600; }
+input, select, button { font: inherit; color: inherit; }
+input[type='text'], input[type='number'], input[type='password'], select {
+  height: 38px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); min-width: 0; width: 100%;
+}
+input:focus-visible, select:focus-visible, button:focus-visible, .segmented input:focus-visible + label {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.segmented { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; }
+.segmented legend { width: 100%; margin-bottom: 4px; padding: 0; }
+.segmented input { position: absolute; opacity: 0; }
+.segmented label {
+  height: 38px; padding: 0 18px; display: grid; place-items: center; cursor: pointer; font-weight: 600;
+  border: 1px solid var(--line); background: var(--bg);
+}
+.segmented label:first-of-type { border-radius: 8px 0 0 8px; }
+.segmented label:last-of-type { border-radius: 0 8px 8px 0; border-left: 0; }
+#buy:checked + label { background: var(--buy); border-color: var(--buy); color: #fff; }
+#sell:checked + label { background: var(--sell); border-color: var(--sell); color: #fff; }
+.holdings-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 6px 0 10px; flex-wrap: wrap; }
+.holdings-head h2 { margin: 0; }
+.holdings-labels, .holding { display: grid; grid-template-columns: 1.1fr 0.9fr 1.4fr 38px; gap: 8px; }
+.holdings-labels { margin-bottom: 4px; }
+.holding { margin-bottom: 8px; }
+.pill { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--ok-bg); color: var(--buy); }
+.pill.bad { background: var(--err-bg); color: var(--sell); }
+button { height: 38px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); cursor: pointer; font-weight: 600; }
+button:hover { border-color: var(--accent); }
+button:disabled { opacity: 0.55; cursor: not-allowed; }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); width: 100%; height: 44px; font-size: 16px; }
+.ghost { color: var(--accent); }
+.remove { padding: 0; color: var(--sell); }
+.actions { margin-top: 4px; }
+details { margin-bottom: 14px; }
+summary { cursor: pointer; color: var(--muted); font-weight: 600; margin-bottom: 10px; }
+.check { display: flex; align-items: center; gap: 8px; height: 38px; }
+.error { background: var(--err-bg); color: var(--sell); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; }
+.error ul { margin: 6px 0 0; padding-left: 18px; }
+.empty { color: var(--muted); padding: 28px 8px; text-align: center; }
+.banner { border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-weight: 600; background: var(--ok-bg); color: var(--buy); }
+.banner.scheduled { background: var(--warn-bg); color: var(--warn-ink); }
+.banner small { display: block; font-weight: 400; margin-top: 2px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 0 0 16px; }
+.stats div { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.stats dt { font-size: 12px; color: var(--muted); font-weight: 600; }
+.stats dd { margin: 2px 0 0; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 12px; color: var(--muted); }
+.num { text-align: right; }
+tbody tr.clickable { cursor: pointer; }
+tbody tr.clickable:hover { background: var(--bg); }
+.tag { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; color: #fff; }
+.tag.BUY { background: var(--buy); }
+.tag.SELL { background: var(--sell); }
+.muted { color: var(--muted); font-size: 13px; }
+.pager { justify-content: flex-end; align-items: center; margin: 14px 0 0; }
+td small { display: block; color: var(--muted); font-size: 11px; }
