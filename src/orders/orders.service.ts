@@ -33,14 +33,22 @@ export class OrdersService {
   ): { order: Order; replayed: boolean } {
     const fingerprint = this.fingerprint(dto);
 
-    if (idempotencyKey) {
-      const previous = this.repository.findByIdempotencyKey(idempotencyKey);
-      if (previous && previous.fingerprint !== fingerprint) {
+    const previous = idempotencyKey
+      ? this.repository.findByIdempotencyKey(idempotencyKey)
+      : undefined;
+    if (previous) {
+      if (previous.fingerprint !== fingerprint) {
         throw new ConflictException(
           'This Idempotency-Key was already used with a different request body.',
         );
       }
-      if (previous) return { order: previous.order, replayed: true };
+      // The order exists but is too old to return. Refuse, so a late retry never creates a duplicate.
+      if (!previous.order) {
+        throw new ConflictException(
+          'This Idempotency-Key was already used, but its order has been removed from the history (memory limit). It was not created again.',
+        );
+      }
+      return { order: previous.order, replayed: true };
     }
 
     const split = this.split(dto);

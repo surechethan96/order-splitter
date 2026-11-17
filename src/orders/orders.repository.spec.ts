@@ -45,14 +45,31 @@ describe('OrdersRepository', () => {
     expect(repo.findByIdempotencyKey('other')).toBeUndefined();
   });
 
-  it('drops the oldest orders (and their keys) once the limit is reached', () => {
+  it('drops the oldest orders once the limit is reached, but keeps their keys', () => {
     const repo = new OrdersRepository(testConfig({ maxStoredOrders: 2 }));
     repo.save(order('1'), { key: 'k1', fingerprint: 'abc' });
     repo.save(order('2'));
     repo.save(order('3'));
 
     expect(repo.findById('1')).toBeUndefined();
-    expect(repo.findByIdempotencyKey('k1')).toBeUndefined();
     expect(repo.findAll({ limit: 10, offset: 0 }).total).toBe(2);
+    // The key is still known, with no order behind it.
+    expect(repo.findByIdempotencyKey('k1')).toEqual({ fingerprint: 'abc' });
+  });
+
+  it('forgets the oldest keys once the key limit is reached', () => {
+    const repo = new OrdersRepository(
+      testConfig({ maxStoredOrders: 1, maxIdempotencyKeys: 2 }),
+    );
+    repo.save(order('1'), { key: 'k1', fingerprint: 'a' });
+    repo.save(order('2'), { key: 'k2', fingerprint: 'b' });
+    repo.save(order('3'), { key: 'k3', fingerprint: 'c' });
+
+    expect(repo.findByIdempotencyKey('k1')).toBeUndefined();
+    expect(repo.findByIdempotencyKey('k2')).toEqual({ fingerprint: 'b' });
+    expect(repo.findByIdempotencyKey('k3')).toEqual({
+      fingerprint: 'c',
+      order: order('3'),
+    });
   });
 });

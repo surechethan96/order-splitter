@@ -49,9 +49,11 @@ Content type is `application/json`.
 | `portfolio[].weight` | number | yes | Percent, 0.01 to 100, up to 2 decimals. All weights must add up to exactly 100 |
 | `portfolio[].price` | number | no | Market price from the partner, 0.01 to 1,000,000, up to 4 decimals. If missing or `null`, the fixed price ($100) is used |
 
-Numbers must be JSON numbers (`100`, not `"100"`). Unknown fields are rejected. The body can be up to 100 KB.
+Numbers must be JSON numbers (`100`, not `"100"`). Unknown fields are rejected, including `__proto__`, `constructor` and `prototype`. The body can be up to 100 KB and at most 10 levels deep.
 
 Optional header: `Idempotency-Key` (1 to 128 characters, no spaces). Send the same key when you retry and you get the first order back instead of a duplicate. The response then has the header `Idempotent-Replayed: true`.
+
+Keys are kept separately from the order history (up to `MAX_IDEMPOTENCY_KEYS`, default 100,000). If the order itself has already been dropped from history because of `MAX_STORED_ORDERS`, a retry with its key gets `409` instead of creating the order again. Only after a restart, or once 100,000 newer keys have been used, is a key forgotten and treated as new.
 
 ## Request examples
 
@@ -153,19 +155,17 @@ Every error has the same shape:
 | Status | When |
 | --- | --- |
 | 400 | Body, query or id is not valid |
-| 401 | `API_KEY` is set on the server and the `x-api-key` header is missing or wrong |
 | 404 | No order with that id |
-| 409 | Same `Idempotency-Key` sent again with a different body |
+| 409 | Same `Idempotency-Key` sent again with a different body, or its order has already been dropped from history |
 | 413 | Body larger than 100 KB |
 | 422 | The amount is too small to trade any share, or a quantity has too many digits to be returned exactly |
-| 429 | Too many requests |
 
 ## How the numbers are worked out
 
 1. **Amount per stock** = weight x total amount, in whole cents. Spare cents go to the stocks with the largest remainder, so the parts always add up to the total.
 2. **Price** = the partner's price if sent, otherwise the fixed price.
 3. **Quantity** = amount / price, rounded **down** to the allowed decimals. Rounding down means we never trade more than the partner asked for.
-4. **`amount`** = quantity x price. **`unallocatedAmount`** is what is left because of rounding.
+4. **`amount`** = quantity x price, rounded **down** to the cent, so it never shows more than is really traded (99.99 x $3.3333 = $333.2967 shows as $333.29). **`allocatedAmount`** is the sum of the amounts and **`unallocatedAmount`** is the rest, so the two always add up to the total.
 5. **When to execute**: now if the market is open (Monday to Friday, 09:30 to 16:00 New York time, except configured holidays), otherwise the next market open.
 
 All maths uses `decimal.js`, not floating point.
@@ -176,9 +176,12 @@ All maths uses `decimal.js`, not floating point.
 | --- | --- |
 | Weights do not add up to 100, or a symbol appears twice | 400 with a clear message |
 | Numbers sent as text, missing fields, unknown fields | 400. One message per field, the most basic problem first |
+| `__proto__`, `constructor` or `prototype` keys, anywhere in the body or query | 400, like any other unknown field |
 | Numbers written like `1e-7`, lists inside lists, `null` items, a list as the body | 400, never a 500 |
+| A body nested thousands of levels deep | 400 (limit is 10 levels), never a 500 |
 | Odd cents, for example $0.05 across three stocks | Split as 2, 1 and 2 cents, so the parts add up to the total |
 | Quantity does not divide evenly | Rounded down. The leftover is returned as `unallocatedAmount` |
+| quantity x price has more than 2 decimals | `amount` is rounded down to the cent, never up |
 | One stock rounds to 0 shares | Returned with quantity 0, so the partner can skip it |
 | Every stock rounds to 0 shares | 422, nothing is stored |
 | A quantity with more than 15 digits (possible with 8 decimals and huge amounts) | 422, because a JSON number could not hold it exactly |
@@ -188,10 +191,9 @@ All maths uses `decimal.js`, not floating point.
 | Order placed on a weekend, after the close or on a holiday | `executeAt` is the next market open |
 | Daylight saving change | Handled. The open stays at 09:30 market time |
 | Body larger than 100 KB | 413 |
-| Too many requests | 429 |
 | Order id in upper case | Found |
 | Client closes the connection early | Logged as `ABORTED` with the time |
-| More than `MAX_STORED_ORDERS` orders | The oldest are dropped |
+| More than `MAX_STORED_ORDERS` orders | The oldest are dropped. Their `Idempotency-Key`s are kept, so a late retry gets 409, not a duplicate |
 | A wrong setting, such as `QUANTITY_DECIMALS=99` | The app refuses to start and says why |
 
 ## Settings
@@ -205,9 +207,8 @@ All are environment variables and all are optional. Wrong values stop the app at
 | `MARKET_TIMEZONE` | `America/New_York` | Time zone of the market |
 | `MARKET_OPEN` / `MARKET_CLOSE` | `09:30` / `16:00` | Market hours |
 | `MARKET_HOLIDAYS` | none | Extra closed days, for example `2026-11-26,2026-12-25` |
-| `API_KEY` | not set | When set, API calls need the `x-api-key` header |
-| `RATE_LIMIT_MAX` / `RATE_LIMIT_TTL_MS` | `120` / `60000` | Requests allowed per client per time window |
 | `MAX_STORED_ORDERS` | `10000` | Orders kept in memory. Oldest are dropped first |
+| `MAX_IDEMPOTENCY_KEYS` | `100000` | Idempotency-Keys kept in memory, separately from orders. Must be at least `MAX_STORED_ORDERS` |
 | `PORT` | `3000` | HTTP port |
 
 ## Response time in the console
@@ -230,7 +231,7 @@ npm run test:cov     # with coverage report
 npm run lint:check
 ```
 
-179 tests. Coverage: 100% lines and functions, 99% statements, 91% branches. The test run fails if coverage drops below 95% (90% for branches).
+185 tests. Coverage: 100% lines and functions, 99% statements, 92% branches. The test run fails if coverage drops below 95% (90% for branches).
 
 | Test file | What it covers |
 | --- | --- |
@@ -238,11 +239,11 @@ npm run lint:check
 | `market-calendar.service.spec.ts` | Open and closed times, weekends, daylight saving, holidays, another time zone |
 | `create-order.dto.spec.ts` | Every input rule: about 60 valid and invalid requests |
 | `orders.service.spec.ts` | Create, history, idempotency, too-small and too-precise orders |
-| `orders.repository.spec.ts` | Storing, paging, filter, memory cap |
+| `orders.repository.spec.ts` | Storing, paging, filter, memory caps for orders and keys |
 | `orders.controller.spec.ts` | Headers and idempotency key format |
 | `app.config.spec.ts` | Settings: defaults, limits, bad values |
-| `common.spec.ts` | Request log line, error format, API key check, health |
-| `test/app.e2e-spec.ts` | The real HTTP API from outside, including bad input, limits, security settings and holidays |
+| `common.spec.ts` | Request log line, error format, unsafe-input check, health |
+| `test/app.e2e-spec.ts` | The real HTTP API from outside, including bad input, limits, other settings and holidays |
 
 ## Project layout
 
@@ -258,7 +259,7 @@ src/
     orders.controller.ts      REST endpoints
     dto/                      request shapes and validation
   market/                     when the market is open
-  common/                     request logging, error format, API key check
+  common/                     request logging, error format, unsafe-input check
   health/                     health check
 public/                       the console page (plain HTML, CSS, JS)
 test/                         end-to-end tests
@@ -271,7 +272,6 @@ test/                         end-to-end tests
 | `@nestjs/*` (core, common, platform-express) | Framework |
 | `@nestjs/swagger` | Swagger docs at `/docs` |
 | `@nestjs/config` | Loads `.env` |
-| `@nestjs/throttler` | Rate limiting |
 | `class-validator`, `class-transformer` | Request validation |
 | `decimal.js` | Exact money and share maths |
 | `luxon` | Time zones and daylight saving |

@@ -218,16 +218,42 @@ describe('Order Splitter API (end to end)', () => {
       });
     });
 
-    it('ignores __proto__ and constructor keys without polluting objects', async () => {
+    it('rejects __proto__, constructor and prototype keys like any other unknown field', async () => {
       const raw =
         '{"orderType":"BUY","totalAmount":100,"__proto__":{"polluted":true},' +
         '"constructor":{"prototype":{"polluted":true}},' +
         '"portfolio":[{"symbol":"AAPL","weight":100}]}';
-      const res = await post(raw);
+      const res = await post(raw).expect(400);
 
-      expect([201, 400]).toContain(res.status);
+      expect(res.body.message).toBe('Validation failed');
+      expect(res.body.details).toEqual([
+        'property __proto__ should not exist',
+        'property constructor should not exist',
+      ]);
       expect(({} as Record<string, unknown>).polluted).toBeUndefined();
-      expect(JSON.stringify(res.body)).not.toContain('polluted');
+    });
+
+    it('rejects those keys inside a holding too', async () => {
+      const raw =
+        '{"orderType":"BUY","totalAmount":100,' +
+        '"portfolio":[{"symbol":"AAPL","weight":100,"__proto__":{"x":1}}]}';
+      const res = await post(raw).expect(400);
+      expect(res.body.details).toEqual([
+        'property portfolio.0.__proto__ should not exist',
+      ]);
+    });
+
+    it('answers 400, not 500, for a body nested thousands of levels deep', async () => {
+      const levels = 20_000; // about 40 KB, so still under the size limit
+      const raw =
+        '{"orderType":"BUY","totalAmount":100,"portfolio":' +
+        '['.repeat(levels) +
+        ']'.repeat(levels) +
+        '}';
+      const res = await post(raw).expect(400);
+      expect(res.body.details).toEqual([
+        'request must not be nested more than 10 levels deep',
+      ]);
     });
 
     it('rejects bad query values and unknown query fields with 400', async () => {
@@ -240,6 +266,8 @@ describe('Order Splitter API (end to end)', () => {
       await api().get(`${ORDERS}?offset=1e30`).expect(400);
       await api().get(`${ORDERS}?orderType=buy`).expect(400);
       await api().get(`${ORDERS}?foo=1`).expect(400);
+      await api().get(`${ORDERS}?__proto__=1`).expect(400);
+      await api().get(`${ORDERS}?constructor=1`).expect(400);
     });
 
     it('answers 404 for routes and methods that do not exist', async () => {
@@ -399,11 +427,12 @@ describe('Order Splitter API (end to end)', () => {
 describe('Order Splitter API with other settings', () => {
   let app: NestExpressApplication;
   const api = () => request(app.getHttpServer());
-  const post = (body: object) =>
-    api().post(ORDERS).set('x-api-key', 'test-key').send(body);
+  const post = (body: object, idempotencyKey?: string) => {
+    const req = api().post(ORDERS);
+    if (idempotencyKey) req.set('Idempotency-Key', idempotencyKey);
+    return req.send(body);
+  };
   const settings = {
-    API_KEY: 'test-key',
-    RATE_LIMIT_MAX: '8',
     QUANTITY_DECIMALS: '7',
     DEFAULT_STOCK_PRICE: '250',
     MAX_STORED_ORDERS: '2',
@@ -415,16 +444,6 @@ describe('Order Splitter API with other settings', () => {
   afterAll(async () => {
     clearEnv(...Object.keys(settings));
     await app.close();
-  });
-
-  it('needs the API key when one is configured, except for the health check', async () => {
-    await api().post(ORDERS).send(example).expect(401);
-    await api()
-      .post(ORDERS)
-      .set('x-api-key', 'wrong')
-      .send(example)
-      .expect(401);
-    await api().get('/health').expect(200);
   });
 
   it('uses the configured quantity decimals and default price', async () => {
@@ -456,26 +475,19 @@ describe('Order Splitter API with other settings', () => {
     await post(example).expect(201);
     await post(example).expect(201);
 
-    const list = await api()
-      .get(ORDERS)
-      .set('x-api-key', 'test-key')
-      .expect(200);
+    const list = await api().get(ORDERS).expect(200);
     expect(list.body.meta.total).toBe(2);
-    await api()
-      .get(`${ORDERS}/${first.body.id}`)
-      .set('x-api-key', 'test-key')
-      .expect(404);
+    await api().get(`${ORDERS}/${first.body.id}`).expect(404);
   });
 
-  it('limits how many requests one client can send, but never the health check', async () => {
-    const statuses: number[] = [];
-    for (let i = 0; i < 10; i++) {
-      statuses.push(
-        (await api().get(ORDERS).set('x-api-key', 'test-key')).status,
-      );
-    }
-    expect(statuses).toContain(429);
-    await api().get('/health').expect(200);
+  it('answers 409 instead of creating a duplicate when a retry comes after its order was dropped', async () => {
+    const first = await post(example, 'late-retry').expect(201);
+    await post(example).expect(201);
+    await post(example).expect(201); // the first order is now out of history
+    await api().get(`${ORDERS}/${first.body.id}`).expect(404);
+
+    const retry = await post(example, 'late-retry').expect(409);
+    expect(retry.body.message).toMatch(/removed from the history/);
   });
 });
 

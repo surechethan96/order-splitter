@@ -1,18 +1,19 @@
 import {
   ArgumentsHost,
   BadRequestException,
-  ExecutionContext,
   HttpException,
   NotFoundException,
-  UnauthorizedException,
+  type ArgumentMetadata,
 } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
 import type { Request, Response } from 'express';
 import { EventEmitter } from 'node:events';
-import { testConfig } from '../../test/helpers';
 import { HealthController } from '../health/health.controller';
 import { AllExceptionsFilter } from './all-exceptions.filter';
-import { ApiKeyGuard } from './api-key.guard';
+import {
+  findInputProblems,
+  MAX_DEPTH,
+  RejectUnsafeInputPipe,
+} from './reject-unsafe-input.pipe';
 import { requestLogger } from './request-logger.middleware';
 
 describe('requestLogger', () => {
@@ -144,11 +145,11 @@ describe('AllExceptionsFilter', () => {
   });
 
   it('keeps a plain text HTTP error message', () => {
-    const { body } = run(new HttpException('Slow down', 429));
+    const { body } = run(new HttpException('Already used', 409));
     expect(body).toMatchObject({
-      statusCode: 429,
-      error: 'Too Many Requests',
-      message: 'Slow down',
+      statusCode: 409,
+      error: 'Conflict',
+      message: 'Already used',
     });
   });
 
@@ -167,39 +168,56 @@ describe('AllExceptionsFilter', () => {
   });
 });
 
-describe('ApiKeyGuard', () => {
-  const context = (apiKeyHeader?: unknown) =>
-    ({
-      getHandler: () => undefined,
-      getClass: () => undefined,
-      switchToHttp: () => ({
-        getRequest: () => ({ headers: { 'x-api-key': apiKeyHeader } }),
-      }),
-    }) as unknown as ExecutionContext;
-  const guard = (apiKey?: string, isPublic = false) =>
-    new ApiKeyGuard(testConfig({ apiKey }), {
-      getAllAndOverride: () => isPublic,
-    } as unknown as Reflector);
+describe('RejectUnsafeInputPipe', () => {
+  const pipe = new RejectUnsafeInputPipe();
+  const as = (type: ArgumentMetadata['type']) => ({ type }) as ArgumentMetadata;
+  const nested = (levels: number) => {
+    let value: unknown = 'leaf';
+    for (let i = 0; i < levels; i++) value = [value];
+    return value;
+  };
 
-  it('lets everything through when no API key is configured', () => {
-    expect(guard().canActivate(context())).toBe(true);
+  it('finds __proto__, constructor and prototype keys at any depth', () => {
+    const body = JSON.parse(
+      '{"__proto__":{"x":1},"constructor":{},"portfolio":[{"symbol":"A","prototype":1}]}',
+    ) as unknown;
+    expect(findInputProblems(body)).toEqual([
+      'property __proto__ should not exist',
+      'property constructor should not exist',
+      'property portfolio.0.prototype should not exist',
+    ]);
   });
 
-  it('accepts the right key and rejects a wrong or missing one', () => {
-    expect(guard('secret').canActivate(context('secret'))).toBe(true);
-    expect(() => guard('secret').canActivate(context('wrong'))).toThrow(
-      UnauthorizedException,
-    );
-    expect(() => guard('secret').canActivate(context())).toThrow(
-      UnauthorizedException,
-    );
-    expect(() => guard('secret').canActivate(context(['secret']))).toThrow(
-      UnauthorizedException,
-    );
+  it('rejects them with the same message as any other unknown field', () => {
+    const body = JSON.parse('{"__proto__":{"polluted":true}}') as unknown;
+    expect(() => pipe.transform(body, as('body'))).toThrow(BadRequestException);
+    try {
+      pipe.transform(body, as('body'));
+    } catch (error) {
+      expect((error as BadRequestException).getResponse()).toMatchObject({
+        message: ['property __proto__ should not exist'],
+      });
+    }
   });
 
-  it('skips routes marked as public', () => {
-    expect(guard('secret', true).canActivate(context())).toBe(true);
+  it('checks the query too, and leaves clean values and other params alone', () => {
+    const query = JSON.parse('{"constructor":"x"}') as unknown;
+    expect(() => pipe.transform(query, as('query'))).toThrow(
+      BadRequestException,
+    );
+    const clean = { orderType: 'BUY', portfolio: [{ symbol: 'A' }] };
+    expect(pipe.transform(clean, as('body'))).toBe(clean);
+    expect(pipe.transform('__proto__', as('param'))).toBe('__proto__');
+    expect(pipe.transform(null, as('body'))).toBeNull();
+  });
+
+  it('allows normal nesting but rejects input nested too deeply, without crashing', () => {
+    const tooDeep = [
+      `request must not be nested more than ${MAX_DEPTH} levels deep`,
+    ];
+    expect(findInputProblems(nested(MAX_DEPTH))).toEqual([]);
+    expect(findInputProblems(nested(MAX_DEPTH + 1))).toEqual(tooDeep);
+    expect(findInputProblems(nested(100_000))).toEqual(tooDeep);
   });
 });
 

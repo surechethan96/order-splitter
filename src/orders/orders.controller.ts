@@ -18,7 +18,6 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
-  ApiSecurity,
   ApiTags,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
@@ -29,7 +28,6 @@ import { Order, OrderPage } from './order.model';
 import { OrdersService } from './orders.service';
 
 @ApiTags('orders')
-@ApiSecurity('api-key')
 @Controller({ path: 'orders', version: '1' })
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
@@ -50,7 +48,8 @@ export class OrdersController {
   @ApiCreatedResponse({ type: Order })
   @ApiBadRequestResponse({ description: 'The request body is not valid.' })
   @ApiConflictResponse({
-    description: 'Idempotency-Key reused with a different body.',
+    description:
+      'Idempotency-Key reused with a different body, or its order was already removed from history.',
   })
   @ApiUnprocessableEntityResponse({
     description: 'Amount too small to trade any share.',

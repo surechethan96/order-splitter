@@ -27,7 +27,7 @@ export interface SplitLine {
   targetAmount: number;
   // Shares to buy or sell, rounded down to the allowed decimals.
   quantity: number;
-  // quantity times price: what the order is really worth after rounding.
+  // quantity times price, rounded down to the cent, so it never shows more than is really traded.
   amount: number;
 }
 
@@ -68,7 +68,8 @@ export function splitOrder(
     if (quantity.precision(true) > MAX_SAFE_DIGITS) {
       throw new QuantityTooPreciseError(holding.symbol);
     }
-    const amount = quantity.mul(price).toDecimalPlaces(2, D.ROUND_HALF_UP);
+    // Round down: 99.99 x 3.3333 = 333.2967 must show as 333.29, not 333.30.
+    const amount = quantity.mul(price).toDecimalPlaces(2, D.ROUND_DOWN);
     return {
       symbol: holding.symbol,
       weight: holding.weight,

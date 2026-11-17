@@ -4,6 +4,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { join } from 'node:path';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
+import { RejectUnsafeInputPipe } from './common/reject-unsafe-input.pipe';
 import { requestLogger } from './common/request-logger.middleware';
 
 // Everything the HTTP layer needs. Shared by main.ts and the end-to-end tests.
@@ -21,6 +22,8 @@ export function configureApp(app: NestExpressApplication): void {
   app.setGlobalPrefix('api', { exclude: ['health'] });
   app.enableVersioning({ type: VersioningType.URI });
   app.useGlobalPipes(
+    // Runs first: rejects __proto__ / constructor / prototype keys and too-deep nesting with a 400.
+    new RejectUnsafeInputPipe(),
     // Reject unknown fields and wrong types before they reach the business code.
     new ValidationPipe({
       whitelist: true,
@@ -41,7 +44,6 @@ export function configureApp(app: NestExpressApplication): void {
         'Splits an amount across a model portfolio, tells you when to execute, and keeps the order history.',
       )
       .setVersion('1.0.0')
-      .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'api-key')
       .build(),
   );
   SwaggerModule.setup('docs', app, document, {

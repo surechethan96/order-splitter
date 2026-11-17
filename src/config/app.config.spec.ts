@@ -12,9 +12,8 @@ describe('loadConfig', () => {
         close: '16:00',
         holidays: [],
       },
-      apiKey: undefined,
-      rateLimit: { ttlMs: 60000, limit: 120 },
       maxStoredOrders: 10000,
+      maxIdempotencyKeys: 100000,
     });
   });
 
@@ -26,10 +25,8 @@ describe('loadConfig', () => {
       MARKET_TIMEZONE: 'Europe/London',
       MARKET_OPEN: '08:00',
       MARKET_CLOSE: '16:30',
-      API_KEY: 'secret',
-      RATE_LIMIT_TTL_MS: '1000',
-      RATE_LIMIT_MAX: '5',
       MAX_STORED_ORDERS: '50',
+      MAX_IDEMPOTENCY_KEYS: '500',
     });
 
     expect(config.quantityDecimals).toBe(7);
@@ -40,10 +37,19 @@ describe('loadConfig', () => {
       close: '16:30',
       holidays: [],
     });
-    expect(config.apiKey).toBe('secret');
-    expect(config.rateLimit).toEqual({ ttlMs: 1000, limit: 5 });
     expect(config.port).toBe(8080);
     expect(config.maxStoredOrders).toBe(50);
+    expect(config.maxIdempotencyKeys).toBe(500);
+  });
+
+  it('refuses a key limit smaller than the order limit', () => {
+    expect(() =>
+      loadConfig({ MAX_STORED_ORDERS: '100', MAX_IDEMPOTENCY_KEYS: '50' }),
+    ).toThrow(/MAX_IDEMPOTENCY_KEYS/);
+    expect(
+      loadConfig({ MAX_STORED_ORDERS: '100', MAX_IDEMPOTENCY_KEYS: '100' })
+        .maxIdempotencyKeys,
+    ).toBe(100);
   });
 
   it('stops the app with one message that lists every bad setting', () => {
@@ -66,11 +72,11 @@ describe('loadConfig', () => {
   it('treats blank values as not set', () => {
     const config = loadConfig({
       QUANTITY_DECIMALS: '  ',
-      API_KEY: ' ',
+      MAX_STORED_ORDERS: ' ',
       PORT: '',
     });
     expect(config.quantityDecimals).toBe(3);
-    expect(config.apiKey).toBeUndefined();
+    expect(config.maxStoredOrders).toBe(10000);
     expect(config.port).toBe(3000);
   });
 

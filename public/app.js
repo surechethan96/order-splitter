@@ -61,10 +61,8 @@ function updateWeightTotal() {
 
 // ---------- API calls ----------
 async function call(url, options = {}) {
-  const headers = { ...options.headers };
-  if ($('apiKey').value) headers['x-api-key'] = $('apiKey').value;
   const started = performance.now();
-  const response = await fetch(url, { ...options, headers });
+  const response = await fetch(url, options);
   const body = await response.json().catch(() => ({}));
   return { ok: response.ok, status: response.status, body, ms: performance.now() - started };
 }

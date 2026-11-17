@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import {
   QuantityTooPreciseError,
   splitOrder,
@@ -194,11 +195,25 @@ describe('splitOrder', () => {
         quantityDecimals: 4,
       },
     );
+    // 300.03 x 0.3333 = 99.999999, so the amount shows 99.99, never 100.
     expect(lines[0]).toMatchObject({
       price: 0.3333,
       quantity: 300.03,
-      amount: 100,
+      amount: 99.99,
     });
+  });
+
+  it('rounds the line amount down, so it never shows more than is traded', () => {
+    const result = splitOrder(
+      333.3,
+      [{ symbol: 'A', weight: 100, price: 3.3333 }],
+      { ...options, quantityDecimals: 2 },
+    );
+
+    // 99.99 x 3.3333 = 333.296667: shown as 333.29, not 333.30.
+    expect(result.lines[0]).toMatchObject({ quantity: 99.99, amount: 333.29 });
+    expect(result.allocatedAmount).toBe(333.29);
+    expect(result.unallocatedAmount).toBe(0.01);
   });
 
   it('accepts the default price as text or as a number', () => {
@@ -268,8 +283,18 @@ describe('splitOrder', () => {
       expect(targetCents).toBe(Math.round(total * 100));
       expect(result.allocatedAmount).toBeLessThanOrEqual(total);
       expect(result.unallocatedAmount).toBeGreaterThanOrEqual(0);
+      // The totals add up exactly: allocated + unallocated = total.
+      expect(
+        new Decimal(result.allocatedAmount)
+          .plus(result.unallocatedAmount)
+          .equals(total),
+      ).toBe(true);
       for (const line of result.lines) {
         expect(line.amount).toBeLessThanOrEqual(line.targetAmount);
+        // The amount shown is never more than what is really traded.
+        expect(
+          new Decimal(line.quantity).mul(line.price).gte(line.amount),
+        ).toBe(true);
       }
     }
   });

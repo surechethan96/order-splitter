@@ -18,8 +18,7 @@ async function bootstrap(): Promise<void> {
   logger.log(`API       http://localhost:${config.port}/api/v1/orders`);
   logger.log(
     `Settings  quantity decimals=${config.quantityDecimals}, default price=$${config.defaultStockPrice}, ` +
-      `market ${config.market.open}-${config.market.close} ${config.market.timezone}, ` +
-      `api key ${config.apiKey ? 'on' : 'off'}`,
+      `market ${config.market.open}-${config.market.close} ${config.market.timezone}`,
   );
 }
 

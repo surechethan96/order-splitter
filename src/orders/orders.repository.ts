@@ -3,22 +3,22 @@ import { APP_CONFIG, type AppConfig } from '../config/app.config';
 import { OrderType } from './dto/create-order.dto';
 import { Order } from './order.model';
 
-interface StoredOrder {
-  order: Order;
-  idempotencyKey?: string;
-}
-
+// What we know about a used Idempotency-Key. `order` is missing when the order was dropped from history.
 export interface IdempotencyRecord {
   fingerprint: string;
-  order: Order;
+  order?: Order;
 }
 
 // In-memory store (data is lost on restart, as asked). Kept behind this class so a real DB can replace it later.
 @Injectable()
 export class OrdersRepository {
-  private readonly orders: StoredOrder[] = []; // oldest first
+  private readonly orders: Order[] = []; // oldest first
   private readonly byId = new Map<string, Order>();
-  private readonly byIdempotencyKey = new Map<string, IdempotencyRecord>();
+  // Kept apart from the history, so dropping an old order does not forget its key. A Map keeps insertion order.
+  private readonly keys = new Map<
+    string,
+    { fingerprint: string; orderId: string }
+  >();
 
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
@@ -26,12 +26,12 @@ export class OrdersRepository {
     order: Order,
     idempotency?: { key: string; fingerprint: string },
   ): Order {
-    this.orders.push({ order, idempotencyKey: idempotency?.key });
+    this.orders.push(order);
     this.byId.set(order.id, order);
     if (idempotency) {
-      this.byIdempotencyKey.set(idempotency.key, {
+      this.keys.set(idempotency.key, {
         fingerprint: idempotency.fingerprint,
-        order,
+        orderId: order.id,
       });
     }
     this.evictOldest();
@@ -43,7 +43,12 @@ export class OrdersRepository {
   }
 
   findByIdempotencyKey(key: string): IdempotencyRecord | undefined {
-    return this.byIdempotencyKey.get(key);
+    const record = this.keys.get(key);
+    if (!record) return undefined;
+    return {
+      fingerprint: record.fingerprint,
+      order: this.byId.get(record.orderId),
+    };
   }
 
   // Newest first, with an optional BUY/SELL filter.
@@ -52,7 +57,6 @@ export class OrdersRepository {
     total: number;
   } {
     const matching = this.orders
-      .map((stored) => stored.order)
       .filter(
         (order) => !filter.orderType || order.orderType === filter.orderType,
       )
@@ -66,9 +70,12 @@ export class OrdersRepository {
   private evictOldest(): void {
     while (this.orders.length > this.config.maxStoredOrders) {
       const oldest = this.orders.shift()!;
-      this.byId.delete(oldest.order.id);
-      if (oldest.idempotencyKey)
-        this.byIdempotencyKey.delete(oldest.idempotencyKey);
+      this.byId.delete(oldest.id);
+    }
+    // Oldest keys come first, so delete from the front until we are back under the limit.
+    for (const key of this.keys.keys()) {
+      if (this.keys.size <= this.config.maxIdempotencyKeys) break;
+      this.keys.delete(key);
     }
   }
 }

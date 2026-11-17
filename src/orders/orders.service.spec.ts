@@ -201,6 +201,16 @@ describe('OrdersService', () => {
       );
     });
 
+    it('refuses a late retry whose order was dropped from history, instead of creating a duplicate', () => {
+      const service = build({ maxStoredOrders: 1 });
+      service.create(dto(), 'key-1');
+      service.create(dto()); // pushes the first order out of history
+
+      expect(() => service.create(dto(), 'key-1')).toThrow(ConflictException);
+      expect(() => service.create(dto(), 'key-1')).toThrow(/removed/);
+      expect(service.findAll({ limit: 20, offset: 0 }).meta.total).toBe(1);
+    });
+
     it('creates separate orders for different keys or no key', () => {
       const service = build();
       service.create(dto(), 'key-1');

@@ -16,11 +16,10 @@ export interface AppConfig {
     // Extra closed days as YYYY-MM-DD, in market time.
     holidays: string[];
   };
-  // When set, every API call must send this value in the x-api-key header.
-  apiKey?: string;
-  rateLimit: { ttlMs: number; limit: number };
   // Cap on orders kept in memory, so the process cannot grow without limit.
   maxStoredOrders: number;
+  // Cap on Idempotency-Keys kept in memory. Keys outlive their orders, so a late retry is not run twice.
+  maxIdempotencyKeys: number;
 }
 
 type Env = Record<string, string | undefined>;
@@ -90,13 +89,14 @@ export function loadConfig(rawEnv: Env = process.env): AppConfig {
     quantityDecimals: int('QUANTITY_DECIMALS', 3, 0, 8),
     defaultStockPrice,
     market: { timezone, open, close, holidays },
-    apiKey: env.API_KEY || undefined,
-    rateLimit: {
-      ttlMs: int('RATE_LIMIT_TTL_MS', 60_000, 1_000, 3_600_000),
-      limit: int('RATE_LIMIT_MAX', 120, 1, 100_000),
-    },
     maxStoredOrders: int('MAX_STORED_ORDERS', 10_000, 1, 1_000_000),
+    maxIdempotencyKeys: int('MAX_IDEMPOTENCY_KEYS', 100_000, 1, 10_000_000),
   };
+
+  // A key must never be forgotten while its order is still stored.
+  if (config.maxIdempotencyKeys < config.maxStoredOrders) {
+    errors.push('MAX_IDEMPOTENCY_KEYS must be at least MAX_STORED_ORDERS');
+  }
 
   if (errors.length > 0) {
     throw new Error(`Invalid configuration:\n- ${errors.join('\n- ')}`);
