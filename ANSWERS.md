@@ -24,50 +24,38 @@ The whole time I was trying not to over-engineer. No database, no CQRS, no event
 
 | # | Assumption | Reasoning |
 | --- | --- | --- |
-| 1 | Weights are percentages and have to add up to exactly 100. Each one is between 0.01 and 100, up to 2 decimals. | A portfolio that sums to 90 or 110 is almost certainly a mistake, and I'd rather reject it than quietly guess what was meant. |
-| 2 | `totalAmount` is in USD, from 0.01 up to 10,000,000, 2 decimals. | The brief is in USD. The cap is just there to catch fat-finger errors. |
-| 3 | For a SELL, `totalAmount` is the dollar value to sell, split by the same weights. I don't check what the user actually holds. | The brief treats "amount to be purchased/sold" as a single input, and holdings aren't part of this POC. |
-| 4 | Price is per stock and optional, 0.01 to 1,000,000, up to 4 decimals. If the partner sends it, it wins; if it's missing or null, the fixed $100 kicks in. A single request can mix both. | The brief says the partner price "should take priority", and per-stock is the most flexible way to read that. |
-| 5 | "Price at time of purchase" means the price in the request. There's no live feed. | The brief fixes the price to keep things simple. |
-| 6 | A symbol can only show up once. Symbols are 1–10 characters, stored upper case. | Two lines for the same stock is ambiguous. I don't verify the symbol actually exists. |
-| 7 | A portfolio has between 1 and 100 stocks. | Keeps requests small and predictable. |
-| 8 | Numbers have to be real JSON numbers, and unknown fields get rejected, including `__proto__`, `constructor` and `prototype`. | A strict contract surfaces partner bugs early. `"100"` as a string is treated as a mistake, not coerced. Those three keys get the same 400 as any other unknown field. |
-| 9 | Request bodies can be up to 100 KB and 10 levels deep. | 100 stocks fit several times over; anything bigger gets a 413. A real order is about 4 levels deep, and much deeper bodies would crash the validator, so they get a 400. |
+| 1 | Weights are percentages and must add up to exactly 100 (each 0.01 to 100, up to 2 decimals). | A portfolio that sums to 90 or 110 is almost certainly a mistake, and I'd rather reject it than guess what was meant. |
+| 2 | `totalAmount` is USD, 0.01 to 10,000,000, 2 decimals. For a SELL it's the dollar value to sell, split by the same weights. I don't check what the user holds. | The brief is in USD and treats "amount to be purchased/sold" as one input. The cap catches fat-finger errors, and holdings aren't part of this POC. |
+| 3 | Price is per stock and optional (0.01 to 1,000,000, up to 4 decimals). The partner's price wins; if it's missing or null, the fixed $100 is used. That is the "price at time of purchase", there's no live feed. | The brief says the partner price "should take priority" and fixes the price to keep things simple. Per stock is the most flexible reading. |
+| 4 | A portfolio has 1 to 100 stocks, each symbol only once (1–10 characters, stored upper case). | Keeps requests predictable, and two lines for the same stock is ambiguous. I don't check that the symbol exists. |
+| 5 | Input is strict: real JSON numbers only, unknown fields rejected (including `__proto__`, `constructor` and `prototype`), bodies up to 100 KB and 10 levels deep. | A strict contract surfaces partner bugs early. `"100"` as a string is a mistake, not coerced. Too big gets a 413, too deep gets a 400 instead of crashing the validator. |
 
 ### Calculation
 
 | # | Assumption | Reasoning |
 | --- | --- | --- |
-| 10 | Share quantities are always rounded down, never up. Each stock's `amount` (quantity x price) is also rounded down to the cent. | Rounding up could buy/sell more than asked, or show more than is really traded (99.99 x $3.3333 = $333.2967 shows as $333.29, not $333.30). The leftover shows up as `unallocatedAmount`, and allocated + unallocated always equals the total. |
-| 11 | Money is split in whole cents, and the parts always add back up to the total. | Avoids the classic "lost cent" problem. I used the largest-remainder method. |
-| 12 | Leftover money doesn't get shuffled into another stock. | Moving it would quietly change the weights the partner asked for. |
-| 13 | If a stock rounds to 0 shares it's still returned with quantity 0. If *every* stock rounds to 0, the whole request is rejected with a 422. | The partner can ignore a zero line, but an order with nothing to trade isn't useful. |
-| 14 | BUY and SELL follow the same rules, rounding down included. | Selling slightly fewer shares than the target is safer than selling more. |
-| 15 | Quantity decimals can be 0–8 and apply to every stock. | The brief mentions 3 now and maybe 7 later. One global value is the simplest reading. |
-| 16 | A quantity needing more than 15 digits is rejected with a 422. | A JSON number can't hold that exactly. It only comes up with extreme amounts at tiny prices. |
+| 6 | Money is split in whole cents, and the parts always add up to the total. | Avoids the "lost cent" problem. I used the largest-remainder method. |
+| 7 | Share quantities and each stock's `amount` (quantity x price) are always rounded down, for BUY and SELL alike. | We never trade, or show, more than asked: 99.99 x $3.3333 = $333.2967 shows as $333.29, not $333.30. Selling slightly fewer shares is safer than selling more. |
+| 8 | The leftover stays as `unallocatedAmount` and isn't moved to another stock. A stock that rounds to 0 shares is still returned; if *every* stock rounds to 0, the request gets a 422. | Moving money would change the partner's weights. A zero line can be skipped, but an order with nothing to trade isn't useful. Allocated + unallocated always equals the total. |
+| 9 | Quantity decimals are 0–8 and apply to every stock. A quantity needing more than 15 digits gets a 422. | The brief says 3 now and maybe 7 later, so one global setting is the simplest reading. A JSON number can't hold more than 15 digits exactly. |
 
 ### When to execute
 
 | # | Assumption | Reasoning |
 | --- | --- | --- |
-| 17 | Market hours are Mon–Fri, 09:30 to 16:00 New York time. | The brief only says Monday to Friday, but "when" needs an actual time, so I added US hours. Both are configurable. |
-| 18 | Holidays are a list in the settings, empty by default, no half days. | The brief doesn't mention them, but a real calendar needs them, so the hook is there. |
-| 19 | Market open → execute now. Market closed → execute at the next open. | Simple and predictable. The response gives the time in both UTC and market time. |
-| 20 | An order placed just before the close still says "execute now". | The partner is the one placing the trade, so they own the cut-off. |
-| 21 | The market opens and closes on the same day, no overnight sessions. | Not needed for US stocks. |
+| 10 | Market hours are Mon–Fri, 09:30 to 16:00 New York time, plus a holiday list in the settings (no half days, no overnight sessions). | The brief only says Monday to Friday, but "when" needs an actual time. A real calendar needs holidays, so the hook is there. All configurable. |
+| 11 | Market open → execute now. Market closed → execute at the next open. An order just before the close still says "execute now". | Simple and predictable, with the time in UTC and market time. The partner places the trade, so they own the cut-off. |
 
 ### Storage and behaviour
 
 | # | Assumption | Reasoning |
 | --- | --- | --- |
-| 22 | A `POST` records an order plan. It doesn't place a trade. | The brief says the partner would place the orders themselves. |
-| 23 | History is everything created since the app started, newest first, with paging. Capped at 10,000, then the oldest drop off. | "Data shouldn't survive a restart" means in-memory, and the cap stops memory growing forever. |
-| 24 | Rejected requests aren't stored. | History should only ever show valid plans. |
-| 25 | One partner, one running instance. No accounts or tenants. | It's a POC, idempotency keys live in memory. |
-| 26 | `Idempotency-Key` is optional. Same key + same body returns the original order; same key with a different body (including the same stocks in a different order) gives a 409. Keys are kept apart from the history (up to 100,000), so if the order has already dropped out of the 10,000-order history, a late retry also gets a 409 instead of a duplicate. After a restart, keys are gone. | Retries are safe when the partner wants them, without forcing the header on everyone. When we can no longer return the order, refusing is safer than creating it twice. |
-| 27 | No authentication and no rate limiting. | Both are production concerns, left out to keep the POC lean. See section 4. |
-| 28 | Settings are read once at startup; changing them needs a restart. | Fine for "internally configurable". |
-| 29 | "Response time visible in the console" = one log line per request with the time in ms. | Easiest thing to read while testing. |
+| 12 | A `POST` records an order plan. It doesn't place a trade. | The brief says the partner places the orders themselves. |
+| 13 | History is in memory: everything since startup, newest first, paged, capped at 10,000 (oldest dropped). Rejected requests aren't stored. | "Data shouldn't survive a restart" means in memory, and the cap stops memory growing forever. History should only show valid plans. |
+| 14 | `Idempotency-Key` is optional. Same key + same body returns the first order; same key + different body gives a 409. Keys are kept apart from the history (up to 100,000), so a late retry whose order has already dropped out also gets a 409, not a duplicate. | Safe retries without forcing the header on everyone. When the order can't be returned any more, refusing is safer than creating it twice. |
+| 15 | One partner, one instance. No authentication, no rate limiting. | It's a POC. Those are production concerns, see section 4. |
+| 16 | Settings are read once at startup; changing them needs a restart. | Fine for "internally configurable". |
+| 17 | "Response time visible in the console" = one log line per request, with the time in ms. | Easiest thing to read while testing. |
 
 ## 3. What challenges did I face?
 
@@ -85,9 +73,6 @@ The most interesting part was attacking my own API. Sending it deliberately brok
 - A body over 100 KB came back as a 500 instead of a 413; the error filter now preserves the 4xx that Express raises.
 
 A couple of smaller ones: `class-validator` runs its decorators bottom-up, so my first version answered a *missing* amount with "must not be greater than 10000000". I reordered the decorators and stop at the first failure, so each field reports its most basic problem first. And on precision, with 8 decimals and a huge amount at a tiny price, a quantity can need 17 digits, but a JSON number only holds 15, so I reject that rather than return something slightly wrong.
-
-There was also a dependency snag: the newest `@nestjs/swagger` wants NestJS 12, but I'm on 11, so I pinned Swagger to 11.
-
 
 ## 4. What would I change for production?
 
@@ -132,7 +117,7 @@ For what it's worth, a fair bit of production thinking is already in here. The s
 
 ## 5. How did I use LLMs?
 
-I used Claude as a pair programmer.It wrote the first drafts of the code, tests and docs, and I reviewed them the way I'd review a colleague's PR. Nothing went in unless the tests, linter and type checker passed.
+I used Claude as a pair programmer. It wrote the first drafts of the code, tests and docs, and I reviewed them the way I'd review a colleague's PR. Nothing went in unless the tests, linter and type checker passed.
 
 **Where it helped**
 
@@ -147,4 +132,3 @@ I used Claude as a pair programmer.It wrote the first drafts of the code, tests 
 - **Idempotency keys dropped with old orders.** When the 10,000-order cap was hit, it deleted the order and its key together, so a late retry could create a duplicate. Caught in code review. Keys are now kept apart from the history, and a late retry gets a 409 instead of a new order.
 - **A test that hid a bug.** Its test for a body with `__proto__` accepted either a 201 or a 400. That let `__proto__` and `constructor` slip past the unknown-field check without anyone noticing. Caught in code review. They are now rejected with a 400, and the test expects exactly that. While fixing this we also found that a body nested thousands of levels deep crashed the validator with a 500. It now gets a 400.
 - **Validation messages.** Its first version answered a *missing* amount with "must not be greater than 10000000", because `class-validator` runs decorators bottom-up. Spotted by running the API, fixed by reordering the decorators and stopping at the first failure.
-- **Library versions.** It installed the newest `@nestjs/swagger`, which needs NestJS 12, on a NestJS 11 project. The install failed, and we pinned Swagger to 11.

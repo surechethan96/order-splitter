@@ -1,10 +1,15 @@
 # Order Splitter
 
-A small API for a robo-advisor partner. You send a model portfolio and an amount. It sends back how much to buy or sell of each stock, how many shares that is, and when to execute. It also keeps the order history.
+A small REST API for a robo-advisor partner. You send a model portfolio and an amount. It sends back how much to buy or sell of each stock, how many shares that is, and when to execute. It also keeps the order history.
 
 Built with NestJS and TypeScript. Data is kept in memory only, so it is gone after a restart.
 
-![Console](docs/console.png)
+> [!NOTE]
+> The console shown below is a small frontend added **only for easy manual testing**. It calls the same public API and has no logic of its own.
+
+![Test console, for easy testing only](docs/console.png)
+
+*Test console (frontend for easy testing only) at http://localhost:3000/*
 
 ## Run it
 
@@ -19,10 +24,10 @@ Then open:
 
 | What | URL |
 | --- | --- |
-| Console (simple UI to try the API) | http://localhost:3000/ |
-| Swagger (docs and interactive testing) | http://localhost:3000/docs |
 | API | http://localhost:3000/api/v1/orders |
+| Swagger (API docs and interactive testing) | http://localhost:3000/docs |
 | Health check | http://localhost:3000/health |
+| Test console (for easy manual testing only) | http://localhost:3000/ |
 
 No setup is needed. To change settings, copy `.env.example` to `.env`.
 
@@ -213,7 +218,7 @@ All are environment variables and all are optional. Wrong values stop the app at
 
 ## Response time in the console
 
-Every request prints one line with the time in milliseconds:
+Every request prints one line in the server's console (terminal) with the time in milliseconds:
 
 ```
 [Nest] LOG  [HTTP] POST /api/v1/orders 201 2.41 ms [adc87e03-bdf8-4094-8f7d-053271846b61]
@@ -222,6 +227,10 @@ Every request prints one line with the time in milliseconds:
 ```
 
 The value in brackets is the request id. It is also returned in the `X-Request-Id` header and in error bodies.
+
+## Test console (for easy testing only)
+
+The page at http://localhost:3000/ (screenshot at the top) lets you try the API by hand, without curl or Swagger: build a portfolio, split it, and browse the history. It is a testing aid, not part of the product. It only calls the public API above and has no logic of its own. Plain HTML, CSS and JavaScript in `public/`, no build step.
 
 ## Tests
 
@@ -245,6 +254,12 @@ npm run lint:check
 | `common.spec.ts` | Request log line, error format, unsafe-input check, health |
 | `test/app.e2e-spec.ts` | The real HTTP API from outside, including bad input, limits, other settings and holidays |
 
+## Dependencies and `npm audit`
+
+- **What ships is clean:** `npm audit --omit=dev` reports 0 vulnerabilities.
+- **`glob` and `minimatch`** had advisories inside dev tools (Nest CLI, Jest, ESLint) that had not picked up the fixed versions yet. The `overrides` in `package.json` force the patched versions (`glob` 14.0.2+, `minimatch` 11.0.1+), only where a vulnerable version was used. Lint, build and all tests pass with them.
+- **`picomatch`** (ReDoS, high) has no fixed release yet: every version up to the latest, 4.0.7, is affected. Only dev tools use it, to match file patterns from our own config, never input from API callers, so it cannot be triggered through the running service. npm counts it once per package that depends on it, which is why `npm audit` still shows a large number. Update when a patched `picomatch` is released.
+
 ## Project layout
 
 ```
@@ -261,7 +276,7 @@ src/
   market/                     when the market is open
   common/                     request logging, error format, unsafe-input check
   health/                     health check
-public/                       the console page (plain HTML, CSS, JS)
+public/                       test console for manual testing only (plain HTML, CSS, JS)
 test/                         end-to-end tests
 ```
 
