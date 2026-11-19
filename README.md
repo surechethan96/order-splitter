@@ -4,13 +4,6 @@ A small REST API for a robo-advisor partner. You send a model portfolio and an a
 
 Built with NestJS and TypeScript. Data is kept in memory only, so it is gone after a restart.
 
-> [!NOTE]
-> The console shown below is a small frontend added **only for easy manual testing**. It calls the same public API and has no logic of its own.
-
-![Test console, for easy testing only](docs/console.png)
-
-*Test console (frontend for easy testing only) at http://localhost:3000/*
-
 ## Run it
 
 You need Node.js 20 or newer.
@@ -230,7 +223,14 @@ The value in brackets is the request id. It is also returned in the `X-Request-I
 
 ## Test console (for easy testing only)
 
-The page at http://localhost:3000/ (screenshot at the top) lets you try the API by hand, without curl or Swagger: build a portfolio, split it, and browse the history. It is a testing aid, not part of the product. It only calls the public API above and has no logic of its own. Plain HTML, CSS and JavaScript in `public/`, no build step.
+> [!NOTE]
+> The console below is a small frontend added **only for easy manual testing**. It calls the same API and has no logic of its own.
+
+![Test console, for easy testing only](docs/console.png)
+
+*Test console (frontend for easy testing only) at http://localhost:3000/*
+
+The page lets you try the API by hand, without curl or Swagger: build a portfolio, split it, and browse the history. Plain HTML, CSS and JavaScript in `public/`, no build step.
 
 ## Tests
 
