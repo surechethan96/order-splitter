@@ -158,15 +158,86 @@ Every error has the same shape:
 | 413 | Body larger than 100 KB |
 | 422 | The amount is too small to trade any share, or a quantity has too many digits to be returned exactly |
 
-## How the numbers are worked out
+## Test console (for easy testing only)
 
-1. **Amount per stock** = weight x total amount, in whole cents. Spare cents go to the stocks with the largest remainder, so the parts always add up to the total.
-2. **Price** = the partner's price if sent, otherwise the fixed price.
-3. **Quantity** = amount / price, rounded **down** to the allowed decimals. Rounding down means we never trade more than the partner asked for.
-4. **`amount`** = quantity x price, rounded **down** to the cent, so it never shows more than is really traded (99.99 x $3.3333 = $333.2967 shows as $333.29). **`allocatedAmount`** is the sum of the amounts and **`unallocatedAmount`** is the rest, so the two always add up to the total.
-5. **When to execute**: now if the market is open (Monday to Friday, 09:30 to 16:00 New York time, except configured holidays), otherwise the next market open.
+> [!NOTE]
+> The console below is a small frontend added **only for easy manual testing**. It calls the same API and has no logic of its own.
 
-All maths uses `decimal.js`, not floating point.
+![Test console, for easy testing only](docs/console.png)
+
+*Test console (frontend for easy testing only) at http://localhost:3000/*
+
+The page lets you try the API by hand, without curl or Swagger: build a portfolio, split it, and browse the history. Plain HTML, CSS and JavaScript in `public/`, no build step.
+
+## Response time in the console
+
+Every request prints one line in the server's console (terminal) with the time in milliseconds:
+
+```
+[Nest] LOG  [HTTP] POST /api/v1/orders 201 2.41 ms [adc87e03-bdf8-4094-8f7d-053271846b61]
+[Nest] LOG  [HTTP] GET /api/v1/orders?limit=1 200 1.04 ms [2bcebaf5-90d3-4add-bf2e-b0eab55085fb]
+[Nest] WARN [HTTP] POST /api/v1/orders 400 2.60 ms [2f687752-6f88-4a41-b4f3-548c6b8f1cee]
+```
+
+The value in brackets is the request id. It is also returned in the `X-Request-Id` header and in error bodies.
+
+
+## Tests
+
+```bash
+npm test             # unit + end-to-end
+npm run test:cov     # with coverage report
+npm run lint:check
+```
+
+185 tests. Coverage: 100% lines and functions, 99% statements, 92% branches. The test run fails if coverage drops below 95% (90% for branches).
+
+| Test file | What it covers |
+| --- | --- |
+| `order-splitter.spec.ts` | The maths: the brief's example, partner price, decimals 0 to 8, rounding down, odd cents, 100 stocks, 300 random portfolios |
+| `market-calendar.service.spec.ts` | Open and closed times, weekends, daylight saving, holidays, another time zone |
+| `create-order.dto.spec.ts` | Every input rule: about 60 valid and invalid requests |
+| `orders.service.spec.ts` | Create, history, idempotency, too-small and too-precise orders |
+| `orders.repository.spec.ts` | Storing, paging, filter, memory caps for orders and keys |
+| `orders.controller.spec.ts` | Headers and idempotency key format |
+| `app.config.spec.ts` | Settings: defaults, limits, bad values |
+| `common.spec.ts` | Request log line, error format, unsafe-input check, health |
+| `test/app.e2e-spec.ts` | The real HTTP API from outside, including bad input, limits, other settings and holidays |
+
+
+## Project layout
+
+```
+src/
+  main.ts                     starts the app
+  app.setup.ts                pipes, filters, Swagger, static files
+  config/                     settings from environment variables, checked at start
+  orders/
+    order-splitter.ts         the maths (pure function, no framework)
+    orders.service.ts         use cases: create, list, get, idempotency
+    orders.repository.ts      in-memory store
+    orders.controller.ts      REST endpoints
+    dto/                      request shapes and validation
+  market/                     when the market is open
+  common/                     request logging, error format, unsafe-input check
+  health/                     health check
+public/                       test console for manual testing only (plain HTML, CSS, JS)
+test/                         end-to-end tests
+```
+
+## Libraries used
+
+| Library | Why |
+| --- | --- |
+| `@nestjs/*` (core, common, platform-express) | Framework |
+| `@nestjs/swagger` | Swagger docs at `/docs` |
+| `@nestjs/config` | Loads `.env` |
+| `class-validator`, `class-transformer` | Request validation |
+| `decimal.js` | Exact money and share maths |
+| `luxon` | Time zones and daylight saving |
+| `helmet` | Security headers |
+| `jest`, `supertest` | Tests |
+| `eslint`, `prettier` | Code quality |
 
 ## Edge cases handled
 
@@ -208,100 +279,6 @@ All are environment variables and all are optional. Wrong values stop the app at
 | `MAX_STORED_ORDERS` | `10000` | Orders kept in memory. Oldest are dropped first |
 | `MAX_IDEMPOTENCY_KEYS` | `100000` | Idempotency-Keys kept in memory, separately from orders. Must be at least `MAX_STORED_ORDERS` |
 | `PORT` | `3000` | HTTP port |
-
-## Response time in the console
-
-Every request prints one line in the server's console (terminal) with the time in milliseconds:
-
-```
-[Nest] LOG  [HTTP] POST /api/v1/orders 201 2.41 ms [adc87e03-bdf8-4094-8f7d-053271846b61]
-[Nest] LOG  [HTTP] GET /api/v1/orders?limit=1 200 1.04 ms [2bcebaf5-90d3-4add-bf2e-b0eab55085fb]
-[Nest] WARN [HTTP] POST /api/v1/orders 400 2.60 ms [2f687752-6f88-4a41-b4f3-548c6b8f1cee]
-```
-
-The value in brackets is the request id. It is also returned in the `X-Request-Id` header and in error bodies.
-
-## Test console (for easy testing only)
-
-> [!NOTE]
-> The console below is a small frontend added **only for easy manual testing**. It calls the same API and has no logic of its own.
-
-![Test console, for easy testing only](docs/console.png)
-
-*Test console (frontend for easy testing only) at http://localhost:3000/*
-
-The page lets you try the API by hand, without curl or Swagger: build a portfolio, split it, and browse the history. Plain HTML, CSS and JavaScript in `public/`, no build step.
-
-## Tests
-
-```bash
-npm test             # unit + end-to-end
-npm run test:cov     # with coverage report
-npm run lint:check
-```
-
-185 tests. Coverage: 100% lines and functions, 99% statements, 92% branches. The test run fails if coverage drops below 95% (90% for branches).
-
-| Test file | What it covers |
-| --- | --- |
-| `order-splitter.spec.ts` | The maths: the brief's example, partner price, decimals 0 to 8, rounding down, odd cents, 100 stocks, 300 random portfolios |
-| `market-calendar.service.spec.ts` | Open and closed times, weekends, daylight saving, holidays, another time zone |
-| `create-order.dto.spec.ts` | Every input rule: about 60 valid and invalid requests |
-| `orders.service.spec.ts` | Create, history, idempotency, too-small and too-precise orders |
-| `orders.repository.spec.ts` | Storing, paging, filter, memory caps for orders and keys |
-| `orders.controller.spec.ts` | Headers and idempotency key format |
-| `app.config.spec.ts` | Settings: defaults, limits, bad values |
-| `common.spec.ts` | Request log line, error format, unsafe-input check, health |
-| `test/app.e2e-spec.ts` | The real HTTP API from outside, including bad input, limits, other settings and holidays |
-
-## Dependencies and `npm audit`
-
-- **What ships is clean:** `npm audit --omit=dev` reports 0 vulnerabilities.
-- **`glob` and `minimatch`** had advisories inside dev tools (Nest CLI, Jest, ESLint) that had not picked up the fixed versions yet. The `overrides` in `package.json` force the patched versions (`glob` 14.0.2+, `minimatch` 11.0.1+), only where a vulnerable version was used. Lint, build and all tests pass with them.
-- **`picomatch`** (ReDoS, high) has no fixed release yet: every version up to the latest, 4.0.7, is affected. Only dev tools use it, to match file patterns from our own config, never input from API callers, so it cannot be triggered through the running service. npm counts it once per package that depends on it, which is why `npm audit` still shows a large number. Update when a patched `picomatch` is released.
-
-## Project layout
-
-```
-src/
-  main.ts                     starts the app
-  app.setup.ts                pipes, filters, Swagger, static files
-  config/                     settings from environment variables, checked at start
-  orders/
-    order-splitter.ts         the maths (pure function, no framework)
-    orders.service.ts         use cases: create, list, get, idempotency
-    orders.repository.ts      in-memory store
-    orders.controller.ts      REST endpoints
-    dto/                      request shapes and validation
-  market/                     when the market is open
-  common/                     request logging, error format, unsafe-input check
-  health/                     health check
-public/                       test console for manual testing only (plain HTML, CSS, JS)
-test/                         end-to-end tests
-```
-
-## Libraries used
-
-| Library | Why |
-| --- | --- |
-| `@nestjs/*` (core, common, platform-express) | Framework |
-| `@nestjs/swagger` | Swagger docs at `/docs` |
-| `@nestjs/config` | Loads `.env` |
-| `class-validator`, `class-transformer` | Request validation |
-| `decimal.js` | Exact money and share maths |
-| `luxon` | Time zones and daylight saving |
-| `helmet` | Security headers |
-| `jest`, `supertest` | Tests |
-| `eslint`, `prettier` | Code quality |
-
-## Docker
-
-```bash
-docker build -t order-splitter .
-docker run -p 3000:3000 order-splitter
-```
-
-I wrote the Dockerfile but could not run Docker on the machine I used, so please treat it as untested.
 
 ## More
 
